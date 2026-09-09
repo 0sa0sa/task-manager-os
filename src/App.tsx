@@ -297,6 +297,7 @@ function Detail({
   selectProject,
   selectTask,
   onHerdrState,
+  selectedNodeId,
 }: {
   state: State;
   project: Project | null;
@@ -306,6 +307,7 @@ function Detail({
   selectProject: (id: string | null) => void;
   selectTask: (id: string | null) => void;
   onHerdrState: (state: State) => void;
+  selectedNodeId: string | null;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -679,7 +681,7 @@ function Detail({
       </form>
       <div className="sub-list">
         {task.subtasks.map((s) => (
-          <div className="sub-row" key={s.id}>
+          <div className={`sub-row${s.id === selectedNodeId ? " selected" : ""}`} key={s.id}>
             <button
               className={`check ${s.status}`}
               onClick={() =>
@@ -976,6 +978,7 @@ export default function App() {
           }}
           selectTask={(id) => setTaskId(id)}
           onHerdrState={(next) => setState(next)}
+          selectedNodeId={taskId}
         />
       </div>
       <VoiceBar

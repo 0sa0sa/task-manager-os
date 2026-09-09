@@ -49,6 +49,11 @@ task, or subtask to hide/show it or reset that branch's layout; right-click the 
 all hidden nodes. The VIEW switcher stores multiple named visibility presets, so you can move
 between focused and overview workspaces without losing the individual layout.
 
+Project selection enters an animated `PROJECT CENTER` focus view: the selected project becomes
+the viewport center and its task branches fan outward. Tasks and CLI-activity nodes support hover,
+keyboard focus (`Enter`/`Space`), click selection, and drag positioning; selected nodes remain
+highlighted while their parent task opens in the detail panel.
+
 Herdr-backed tasks also expose a `CLI ACTIVITY` list. It is built from the pane transcript's
 actual Claude Code tool calls (`Bash`, `Read`, `Edit`, `Write`, etc.) and Codex `Ran`/terminal
 events (直近ログから最大24件), including a compact result excerpt. `Task`, `Agent`, `SendMessage`, and `TaskOutput`

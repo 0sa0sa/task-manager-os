@@ -5,6 +5,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
   type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type WheelEvent,
 } from "react";
 import {
@@ -239,6 +240,12 @@ export function FounderGraph({
     // Showing every focused task makes a busy workspace unreadable. Keep the
     // full title in the SVG <title> and reveal one label on hover/selection.
     Boolean(id === taskId || hoverId === id);
+  const activateKeyboard = (event: ReactKeyboardEvent<SVGGElement>, activate: () => void) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    activate();
+  };
 
   const commitView = (next: View | ((current: View) => View)) => {
     setView((current) => {
@@ -254,13 +261,10 @@ export function FounderGraph({
     const nextTarget = !target
       ? home
       : (() => {
-          const width = taskId ? W * 0.46 : W * 0.68;
-          const center = taskId
-            ? target
-            : {
-                x: target.x + (target.x - CX) * 0.25,
-                y: target.y + (target.y - CY) * 0.25,
-              };
+          const width = taskId ? W * 0.46 : W * 0.88;
+          // In focus mode the selected project is the map's visual center.
+          // The viewbox interpolation below provides the animated transition.
+          const center = target;
           return {
             x: center.x - width / 2,
             y: center.y - (H * (width / W)) / 2,
@@ -464,7 +468,7 @@ export function FounderGraph({
         )?.task.id ?? null);
   return (
     <div
-      className={`founder-graph${fullscreen ? " is-fullscreen" : ""}`}
+      className={`founder-graph${fullscreen ? " is-fullscreen" : ""}${projectId ? " is-focus-mode" : ""}`}
       tabIndex={0}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -485,7 +489,7 @@ export function FounderGraph({
       <div className="graph-head">
         <span>
           {activeProject
-            ? activeProject.project.name
+            ? `FOCUS · ${activeProject.project.name} · PROJECT CENTER`
             : "Herdr recorded snapshot · local state overlay"}
         </span>
         <button onClick={() => setFullscreen((value) => !value)}>
@@ -619,11 +623,15 @@ export function FounderGraph({
           return (
             <g
               key={project.id}
-              className="founder-node"
+              className={`founder-node${project.id === projectId ? " selected" : ""}${hoverId === project.id ? " is-hovered" : ""}`}
               transform={`translate(${projectPos.x} ${projectPos.y})`}
+              data-node-id={project.id}
               opacity={nodeOpacity(project.id, "project")}
               onMouseEnter={() => setHoverId(project.id)}
               onMouseLeave={() => setHoverId((current) => (current === project.id ? null : current))}
+              onFocus={() => setHoverId(project.id)}
+              onBlur={() => setHoverId((current) => (current === project.id ? null : current))}
+              onKeyDown={(event) => activateKeyboard(event, () => clickNode(project.id))}
               onPointerDown={(e) => beginNodeDrag(e, project.id)}
               onPointerMove={moveNodeDrag}
               onPointerUp={endNodeDrag}
@@ -684,8 +692,9 @@ export function FounderGraph({
                 return (
                   <g
                     key={task.id}
-                    className="founder-node"
+                    className={`founder-node${task.id === taskId ? " selected" : ""}${hoverId === task.id ? " is-hovered" : ""}`}
                     transform={`translate(${taskPos.x - projectPos.x} ${taskPos.y - projectPos.y})`}
+                    data-node-id={task.id}
                     opacity={nodeOpacity(task.id, "work")}
                     onMouseEnter={(e) => {
                       e.stopPropagation();
@@ -695,6 +704,9 @@ export function FounderGraph({
                       e.stopPropagation();
                       setHoverId((current) => (current === task.id ? null : current));
                     }}
+                    onFocus={() => setHoverId(task.id)}
+                    onBlur={() => setHoverId((current) => (current === task.id ? null : current))}
+                    onKeyDown={(event) => activateKeyboard(event, () => clickNode(project.id, task.id))}
                     onPointerDown={(e) => beginNodeDrag(e, task.id)}
                     onPointerMove={moveNodeDrag}
                     onPointerUp={endNodeDrag}
@@ -751,8 +763,10 @@ export function FounderGraph({
                       return (
                         <g
                           key={subtask.id}
-                          className="founder-node"
+                          className={`founder-node${subtask.id === taskId ? " selected" : ""}${hoverId === subtask.id ? " is-hovered" : ""}`}
                           transform={`translate(${subPos.x - taskPos.x} ${subPos.y - taskPos.y})`}
+                          data-node-id={subtask.id}
+                          aria-label={`${subtask.kind === "delegation" ? "サブエージェント委任" : "CLI実行"}: ${subtask.title}`}
                           opacity={nodeOpacity(subtask.id, "work")}
                           onMouseEnter={(e) => {
                             e.stopPropagation();
@@ -762,6 +776,17 @@ export function FounderGraph({
                             e.stopPropagation();
                             setHoverId((current) => (current === subtask.id ? null : current));
                           }}
+                          onPointerEnter={(e) => {
+                            e.stopPropagation();
+                            setHoverId(subtask.id);
+                          }}
+                          onPointerLeave={(e) => {
+                            e.stopPropagation();
+                            setHoverId((current) => (current === subtask.id ? null : current));
+                          }}
+                          onFocus={() => setHoverId(subtask.id)}
+                          onBlur={() => setHoverId((current) => (current === subtask.id ? null : current))}
+                          onKeyDown={(event) => activateKeyboard(event, () => clickNode(project.id, subtask.id))}
                           onPointerDown={(e) => beginNodeDrag(e, subtask.id)}
                           onPointerMove={moveNodeDrag}
                           onPointerUp={endNodeDrag}
@@ -774,7 +799,7 @@ export function FounderGraph({
                           role="button"
                           tabIndex={0}
                         >
-                          <circle r="5.5" fill="#101918" stroke={subColor} />
+                          <circle r="6.5" fill="#101918" stroke={subColor} />
                           {subtask.id === taskId && (
                             <circle r="8" className="selection-halo" />
                           )}
@@ -788,6 +813,7 @@ export function FounderGraph({
                           <title>
                             {[subtask.title, subtask.command, subtask.output, subtask.delegatedTo ? `委任先: ${subtask.delegatedTo}` : ""].filter(Boolean).join("\n")}
                           </title>
+                          <circle r="10" className="subtask-hit-area" />
                           {showLabel(subtask.id) && (
                             <text y="14" className="task-label">
                               {short(subtask.title, 24)}
