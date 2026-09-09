@@ -49,6 +49,12 @@ task, or subtask to hide/show it or reset that branch's layout; right-click the 
 all hidden nodes. The VIEW switcher stores multiple named visibility presets, so you can move
 between focused and overview workspaces without losing the individual layout.
 
+Herdr-backed tasks also expose a `CLI ACTIVITY` list. It is built from the pane transcript's
+actual Claude Code tool calls (`Bash`, `Read`, `Edit`, `Write`, etc.) and Codex `Ran`/terminal
+events (直近ログから最大24件), including a compact result excerpt. `Task`, `Agent`, `SendMessage`, and `TaskOutput`
+events are marked as delegation and rendered with a purple branch/icon, so work handed to a
+sub-agent is visible as a separate node rather than being mistaken for a normal command.
+
 The project index also wraps Herdr's local controls: create a workspace with a label and working
 directory, then open a new Codex or Claude Code agent pane from a Herdr-backed project by entering
 the task title. These actions call the local `herdr` CLI and sync the live registry back into the

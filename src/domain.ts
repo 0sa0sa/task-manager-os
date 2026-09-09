@@ -1,5 +1,6 @@
 export type Status = 'todo' | 'doing' | 'done';
-export interface Subtask { id: string; title: string; status: Status; source?: 'manual' | 'herdr' }
+export type SubtaskKind = 'execution' | 'delegation';
+export interface Subtask { id: string; title: string; status: Status; source?: 'manual' | 'herdr'; kind?: SubtaskKind; actor?: string; command?: string; output?: string; delegatedTo?: string }
 export interface Task { id: string; title: string; description: string; status: Status; subtasks: Subtask[]; source?: 'manual' | 'herdr'; paneId?: string; workspaceId?: string; agent?: string; agentStatus?: string; agentSessionId?: string; repoPath?: string }
 export interface Project { id: string; name: string; color: string; tasks: Task[]; source?: 'manual' | 'herdr'; workspaceId?: string; repoPath?: string }
 export interface GraphView { id: string; name: string; hidden: string[] }
@@ -23,7 +24,7 @@ export type Command =
   | { type: 'undo' };
 export const COLORS = ['#ee7657', '#42b7a6', '#e8b84b', '#7896f6', '#b989b1', '#7ab77d'];
 export const statusLabel = (s: Status) => ({ todo: 'To do', doing: 'In progress', done: 'Done' }[s]);
-export const progress = (p: Project) => { const all = p.tasks.flatMap(t => [t, ...t.subtasks]); return all.length ? all.filter(x => x.status === 'done').length / all.length : 0; };
+export const progress = (p: Project) => { const all = p.tasks.flatMap(t => [t, ...t.subtasks.filter(subtask => !subtask.kind)]); return all.length ? all.filter(x => x.status === 'done').length / all.length : 0; };
 export const seed = (): State => ({ version: 1, revision: 0, undo: null, layout: { positions: {}, hidden: [], views: [{ id: 'default', name: 'Default', hidden: [] }], activeViewId: 'default' }, projects: [{ id: 'p-welcome', name: 'Task Manager OS', color: COLORS[0], tasks: [{ id: 't-welcome', title: '声で最初のタスクを追加する', description: 'コマンドバーで「Task Manager OSにタスク テストを追加」と話してみましょう。', status: 'todo', subtasks: [] }] }] });
 const clone = <T,>(v: T): T => structuredClone(v);
 const text = (v: unknown, label: string, max = 120) => { if (typeof v !== 'string' || !v.trim() || [...v.trim()].length > max) throw new Error(`${label}は1〜${max}文字で入力してください`); return v.trim(); };

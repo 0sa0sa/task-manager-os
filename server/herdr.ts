@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { COLORS, type Project, type State, type Status, type Task } from '../src/domain.js';
+import { COLORS, type Project, type State, type Status, type Subtask, type Task } from '../src/domain.js';
 
 interface Workspace { workspace_id: string; label: string; }
 interface Pane { pane_id: string; workspace_id: string; agent?: string; agent_status?: string; cwd?: string; foreground_cwd?: string; label?: string; agent_session?: { value?: string } }
@@ -19,27 +19,104 @@ const genericPaneLabel = (label: string | undefined, paneId: string) => {
   if (value === paneId || value.includes(paneId)) return true;
   return /^(?:claude(?:\s+code)?|codex|agent)(?:\s*[·:/-].*)?$/iu.test(value) || /(?:handoff|forked)/iu.test(value);
 };
-const paneHintCache = new Map<string, { at: number; value?: string }>();
-function paneTaskHint(paneId: string): string | undefined {
-  const cached = paneHintCache.get(paneId);
-  if (cached && Date.now() - cached.at < 30_000) return cached.value;
+const paneActivityCache = new Map<string, { at: number; lines: number; text: string }>();
+function readPaneSnapshot(paneId: string, lines = 240): string {
+  const cached = paneActivityCache.get(paneId);
+  if (cached && cached.lines >= lines && Date.now() - cached.at < 15_000) return cached.text;
   try {
-    const raw = execFileSync('herdr', ['pane', 'read', paneId, '--source', 'recent-unwrapped', '--lines', '24', '--format', 'text'], { encoding: 'utf8', timeout: 1500, maxBuffer: 128 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
-    const lines = raw.replace(ANSI_ESCAPE, '').replace(/\r/g, '').split('\n').map(line => line.trim()).filter(Boolean);
-    const recap = lines.find(line => /(?:※\s*)?recap\s*:/iu.test(line))?.replace(/^.*?(?:※\s*)?recap\s*:\s*/iu, '').trim();
-    if (recap && !/^ask\s+(?:codex|claude)\s+to\s+do\s+anything/iu.test(recap)) {
-      const value = recap.replace(/\s+/gu, ' ').slice(0, 96).trim();
-      paneHintCache.set(paneId, { at: Date.now(), value });
-      return value;
-    }
-    const prompts = lines.filter(line => /^(?:❯|›)\s*\S/u.test(line) && !/^›\s*Ask\s+(?:Codex|Claude)\s+to\s+do\s+anything/iu.test(line)).map(line => line.replace(/^(?:❯|›)\s*/u, '').trim());
-    const value = prompts.at(-1)?.replace(/\s+/gu, ' ').slice(0, 96).trim() || undefined;
-    paneHintCache.set(paneId, { at: Date.now(), value });
-    return value;
+    const text = execFileSync('herdr', ['pane', 'read', paneId, '--source', 'recent-unwrapped', '--lines', String(lines), '--format', 'text'], { encoding: 'utf8', timeout: 2500, maxBuffer: 512 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).replace(ANSI_ESCAPE, '').replace(/\r/g, '');
+    paneActivityCache.set(paneId, { at: Date.now(), lines, text });
+    return text;
   } catch {
-    paneHintCache.set(paneId, { at: Date.now() });
-    return undefined;
+    paneActivityCache.set(paneId, { at: Date.now(), lines, text: '' });
+    return '';
   }
+}
+
+const compactActivity = (value: string, max: number) => value.replace(/\s+/gu, ' ').trim().slice(0, max).trim();
+const activityBoundary = (line: string) => /^(?:⏺|•|❯|›|⎿|✻|─|────────────────)/u.test(line);
+const activityToolNames = new Set(['Bash', 'Read', 'Edit', 'Write', 'Update', 'Task', 'Agent', 'SendMessage', 'TaskOutput', 'ApplyPatch', 'WebFetch', 'WebSearch', 'Skill', 'TodoWrite', 'NotebookEdit', 'Grep', 'Glob']);
+const delegationToolNames = new Set(['Task', 'Agent', 'SendMessage', 'TaskOutput']);
+
+function delegatedTarget(detail: string): string | undefined {
+  const match = detail.match(/(?:subagent[_ -]?type|agent[_ -]?type|recipient|target)\s*[=:]\s*["'`]?([^,"'`)\s]+)/iu);
+  return match?.[1] || (detail ? 'sub-agent' : undefined);
+}
+
+function activityId(paneId: string, index: number, detail: string): string {
+  let hash = 2166136261;
+  for (const char of `${paneId}:${index}:${detail}`) { hash ^= char.codePointAt(0) || 0; hash = Math.imul(hash, 16777619); }
+  return `herdr-activity-${paneId.replace(/[^a-zA-Z0-9-]/g, '-')}-${index}-${(hash >>> 0).toString(36)}`;
+}
+
+type ParsedActivity = Pick<Subtask, 'kind' | 'title' | 'actor' | 'command' | 'output' | 'delegatedTo'>;
+
+/** Extracts concrete Claude/Codex tool events from Herdr's terminal transcript. */
+export function extractPaneSubtasks(transcript: string, paneId: string, agent?: string): Subtask[] {
+  const rawLines = transcript.split('\n').filter(line => line.trim());
+  const lines = rawLines.map(line => line.trim());
+  const events: ParsedActivity[] = [];
+  const add = (kind: ParsedActivity['kind'], action: string, detail: string, command?: string, output?: string) => {
+    const cleanDetail = compactActivity(detail, 1000);
+    if (!cleanDetail) return;
+    const delegated = kind === 'delegation';
+    const actionTitle = delegated ? (action === 'SendMessage' ? '委任メッセージ' : action === 'TaskOutput' ? '委任結果' : 'サブエージェント委任') : action === 'Bash' || action === 'Ran' || action === 'Waited' ? 'CLI実行' : action;
+    events.push({ kind, title: `${actionTitle}: ${compactActivity(cleanDetail, 150)}`, actor: agent, command: command ? compactActivity(command, 1000) : undefined, output: output ? compactActivity(output, 800) : undefined, delegatedTo: delegated ? delegatedTarget(cleanDetail) : undefined });
+  };
+  for (let index = 0; index < lines.length && events.length < 40; index += 1) {
+    const line = lines[index];
+    const markerAtColumn = !/^\s/u.test(rawLines[index]);
+    const ran = markerAtColumn ? line.match(/^•\s+(?:Ran|Executed)\s+(.+)$/u) : null;
+    if (ran) {
+      let command = ran[1];
+      let output = '';
+      let cursor = index + 1;
+      while (cursor < lines.length && /^(?:│|└)/u.test(lines[cursor])) {
+        const boxed = lines[cursor];
+        if (boxed.startsWith('└')) {
+          output = boxed.slice(1).trim();
+          cursor += 1;
+          while (cursor < lines.length && !activityBoundary(lines[cursor]) && !/^(?:│|└)/u.test(lines[cursor])) { output += ` ${lines[cursor]}`; cursor += 1; }
+          break;
+        }
+        command += ` ${boxed.slice(1).trim()}`;
+        cursor += 1;
+      }
+      index = cursor - 1;
+      add('execution', 'Ran', command, command, output);
+      continue;
+    }
+    const waited = markerAtColumn ? line.match(/^•\s+Waited for background terminal\s*·\s*(.+)$/u) : null;
+    if (waited) { add('execution', 'Waited', waited[1], waited[1]); continue; }
+    const codexDelegation = markerAtColumn ? line.match(/^•\s+(?:Delegated|Spawned|Assigned)\s+(.+)$/iu) : null;
+    if (codexDelegation) { add('delegation', 'Agent', codexDelegation[1]); continue; }
+    const codexActivity = markerAtColumn ? line.match(/^•\s+(Searched|Explored|Read|Edited|Updated|Created|Deleted|Opened|Inspected)\s+(.+)$/u) : null;
+    if (codexActivity) { add('execution', codexActivity[1], codexActivity[2]); continue; }
+    const tool = markerAtColumn ? line.match(/^(?:⏺|•)\s*([A-Za-z][\w:-]*)\((.*)$/u) : null;
+    if (!tool || !activityToolNames.has(tool[1])) continue;
+    let detail = tool[2];
+    let cursor = index + 1;
+    while (cursor < lines.length && cursor < index + 32 && !activityBoundary(lines[cursor])) { detail += ` ${lines[cursor]}`; cursor += 1; }
+    let output = '';
+    if (cursor < lines.length && /^⎿\s*/u.test(lines[cursor])) {
+      output = lines[cursor].replace(/^⎿\s*/u, '');
+      cursor += 1;
+      let outputLines = 0;
+      while (cursor < lines.length && outputLines < 8 && !activityBoundary(lines[cursor])) { output += ` ${lines[cursor]}`; cursor += 1; outputLines += 1; }
+    }
+    index = cursor - 1;
+    const cleanDetail = detail.replace(/\)\s*$/u, '').trim();
+    add(delegationToolNames.has(tool[1]) ? 'delegation' : 'execution', tool[1], cleanDetail, tool[1] === 'Bash' ? cleanDetail : undefined, output);
+  }
+  return events.slice(-24).map((event, index) => ({ id: activityId(paneId, index, event.title), title: event.title, status: 'done', source: 'herdr', kind: event.kind, actor: event.actor, command: event.command, output: event.output, delegatedTo: event.delegatedTo }));
+}
+
+function paneTaskHint(paneId: string): string | undefined {
+  const lines = readPaneSnapshot(paneId, 240).split('\n').map(line => line.trim()).filter(Boolean);
+  const recap = lines.find(line => /(?:※\s*)?recap\s*:/iu.test(line))?.replace(/^.*?(?:※\s*)?recap\s*:\s*/iu, '').trim();
+  if (recap && !/^ask\s+(?:codex|claude)\s+to\s+do\s+anything/iu.test(recap)) return compactActivity(recap, 96);
+  const prompts = lines.filter(line => /^(?:❯|›)\s*\S/u.test(line) && !/^›\s*Ask\s+(?:Codex|Claude)\s+to\s+do\s+anything/iu.test(line)).map(line => line.replace(/^(?:❯|›)\s*/u, '').trim());
+  return prompts.at(-1) ? compactActivity(prompts.at(-1)!, 96) : undefined;
 }
 
 /**
@@ -81,7 +158,7 @@ export function buildHerdrProjects(workspaces: Workspace[], panes: Pane[]): Proj
         id: `herdr-${workspace.workspace_id}-${pane.pane_id.replace(/[^a-zA-Z0-9-]/g, '-')}`,
         title: count ? `${baseTitle} · ${pane.pane_id}` : baseTitle,
         description: `${agentLabel(pane.agent)} · Herdr pane ${pane.pane_id}${pane.foreground_cwd ? ` · ${pane.foreground_cwd}` : ''}${branch ? ` · branch ${branch}` : ''}`,
-        status: status(pane.agent_status), subtasks: [], source: 'herdr', paneId: pane.pane_id,
+        status: status(pane.agent_status), subtasks: extractPaneSubtasks(readPaneSnapshot(pane.pane_id), pane.pane_id, pane.agent), source: 'herdr', paneId: pane.pane_id,
         workspaceId: workspace.workspace_id, agent: pane.agent, agentStatus: pane.agent_status, agentSessionId: pane.agent_session?.value, repoPath: firstPath || pane.foreground_cwd || pane.cwd,
       };
     });
@@ -147,6 +224,9 @@ export function renameHerdrPane(task: Task, label: string): unknown {
 }
 
 export function readHerdrProjects(): Project[] {
+  // A manual HERDR SYNC is an explicit freshness request; do not reuse the
+  // short-lived transcript cache from the previous snapshot.
+  paneActivityCache.clear();
   const workspaces = cli(['workspace', 'list'])?.workspaces as Workspace[] | undefined;
   const panes = cli(['pane', 'list'])?.panes as Pane[] | undefined;
   if (!Array.isArray(workspaces) || !Array.isArray(panes)) return [];

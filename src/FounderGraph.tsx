@@ -14,6 +14,8 @@ import {
   Maximize2,
   Minimize2,
   Sparkles,
+  Terminal,
+  Users,
   X,
 } from "lucide-react";
 import { progress, statusLabel, type GraphLayout, type State } from "./domain";
@@ -512,7 +514,7 @@ export function FounderGraph({
             {activeProject.project.tasks.filter(task => !hiddenSet.has(task.id)).map(task => (
               <button key={task.id} className={task.id === taskId ? "active" : ""} onClick={() => onTask(task.id)}>
                 <i className={`status-dot ${task.status}`} />
-                <span>{task.title}</span>
+                <span>{task.title}<small>{task.subtasks.length ? `${task.subtasks.length}件のCLI/委任記録` : "実行記録なし"}</small></span>
               </button>
             ))}
           </div>
@@ -585,8 +587,8 @@ export function FounderGraph({
                       <path
                         key={subtask.id}
                         d={curve(taskPos, position(subtask.id, rawSubPos))}
-                        className="founder-link founder-link--sub"
-                        stroke={project.color}
+                        className={`founder-link founder-link--sub${subtask.kind === "delegation" ? " founder-link--delegation" : ""}`}
+                        stroke={subtask.kind === "delegation" ? "#b989b1" : project.color}
                       />
                     ))}
                   </g>
@@ -739,7 +741,9 @@ export function FounderGraph({
                     {subtasks.filter(({ subtask }) => !hiddenSet.has(subtask.id)).map(({ subtask, pos: rawSubPos }) => {
                       const subPos = position(subtask.id, rawSubPos);
                       const subColor =
-                        subtask.status === "done"
+                        subtask.kind === "delegation"
+                          ? "#b989b1"
+                          : subtask.status === "done"
                           ? "#42b7a6"
                           : subtask.status === "doing"
                             ? "#e8b84b"
@@ -774,13 +778,16 @@ export function FounderGraph({
                           {subtask.id === taskId && (
                             <circle r="8" className="selection-halo" />
                           )}
-                          <GitBranch
-                            x="-3"
-                            y="-3"
-                            width="6"
-                            height="6"
-                            color="#83918c"
-                          />
+                          {subtask.kind === "delegation" ? (
+                            <Users x="-3" y="-3" width="6" height="6" color={subColor} />
+                          ) : subtask.kind === "execution" ? (
+                            <Terminal x="-3" y="-3" width="6" height="6" color={subColor} />
+                          ) : (
+                            <GitBranch x="-3" y="-3" width="6" height="6" color="#83918c" />
+                          )}
+                          <title>
+                            {[subtask.title, subtask.command, subtask.output, subtask.delegatedTo ? `委任先: ${subtask.delegatedTo}` : ""].filter(Boolean).join("\n")}
+                          </title>
                           {showLabel(subtask.id) && (
                             <text y="14" className="task-label">
                               {short(subtask.title, 24)}

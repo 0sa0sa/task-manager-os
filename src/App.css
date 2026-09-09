@@ -36,6 +36,18 @@
 .herdr-pane-name button:hover { border-color: #42b7a6; color: #b7e8de; }
 .herdr-pane-name button:disabled { opacity: .45; }
 .conversation-route { display: block; margin-top: 6px; color: #53635d; font: 8px 'DM Mono', monospace; line-height: 1.4; }
+.sub-kind { display: grid; place-items: center; flex: 0 0 18px !important; width: 18px; height: 18px; border: 1px solid #3a4c46; border-radius: 4px; color: #83918c; }
+.sub-kind.execution { color: #e8b84b; border-color: #725e2c; }
+.sub-kind.delegation { color: #b989b1; border-color: #624862; }
+.sub-content { display: grid; min-width: 0; gap: 3px; flex: 1; overflow-wrap: anywhere; }
+.sub-content strong { color: #dbe2da; font-size: 11px; font-weight: 500; }
+.sub-content code { color: #9fb0a7; white-space: pre-wrap; overflow-wrap: anywhere; font: 9px/1.4 'DM Mono', monospace; }
+.sub-content small { color: #71807a; font: 9px/1.4 'DM Mono', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sub-content .sub-delegated { color: #b989b1; }
+.activity-note { margin: 7px 0 0; color: #71807a; font-size: 10px; line-height: 1.5; }
+.legend-marker { width: 7px; height: 7px; border: 1px solid; border-radius: 2px; display: inline-block; }
+.legend-marker.execution { color: #e8b84b; background: rgba(232,184,75,.2); }
+.legend-marker.delegation { color: #b989b1; background: rgba(185,137,177,.2); }
 .graph-task-index { position: absolute; z-index: 3; top: 47px; right: 12px; width: min(270px, 32%); border: 1px solid #394541; border-radius: 4px; background: rgba(13,22,21,.94); backdrop-filter: blur(5px); pointer-events: auto; }
 .graph-task-index-heading { display: flex; justify-content: space-between; padding: 8px 9px 7px; border-bottom: 1px solid #293936; color: #42b7a6; font: 9px 'DM Mono', monospace; letter-spacing: .1em; }
 .graph-task-index-heading b { color: #71807a; font-weight: 400; }
@@ -45,3 +57,5 @@
 .graph-task-index-list button:hover, .graph-task-index-list button.active { background: #182a26; color: #e8e5da; }
 .graph-task-index-list button .status-dot { margin-top: 4px; }
 .graph-task-index-list button span { min-width: 0; overflow-wrap: anywhere; }
+.graph-task-index-list button span small { display: block; margin-top: 3px; color: #53635d; font: 8px 'DM Mono', monospace; }
+.founder-link--delegation { stroke-dasharray: 3 3; opacity: .7; }

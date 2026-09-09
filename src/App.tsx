@@ -4,12 +4,15 @@ import {
   ArrowRight,
   Check,
   FolderPlus,
+  GitBranch,
   Mic,
   MicOff,
   Plus,
   RotateCcw,
   Send,
+  Terminal,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -528,7 +531,7 @@ function Detail({
               <span>
                 {t.title}
                 <small>
-                  {statusLabel(t.status)} · {t.subtasks.length} subtasks
+                  {statusLabel(t.status)} · {t.subtasks.some((item) => item.kind) ? `${t.subtasks.length} CLI events` : `${t.subtasks.length} subtasks`}
                 </small>
               </span>
               <ArrowRight size={15} />
@@ -641,12 +644,13 @@ function Detail({
         </section>
       )}
       <div className="sub-heading">
-        <span>SUBTASKS</span>
+        <span>{task.subtasks.some((item) => item.kind) ? "CLI ACTIVITY" : "SUBTASKS"}</span>
         <b>
           {task.subtasks.filter((x) => x.status === "done").length}/
           {task.subtasks.length}
         </b>
       </div>
+      {task.subtasks.some((item) => item.kind) && <p className="activity-note">Herdrの直近ログから抽出した実行内容。紫色のノードはサブエージェントへの委任です。</p>}
       <form
         className="create-form"
         onSubmit={(e) => {
@@ -690,7 +694,16 @@ function Detail({
             >
               {s.status === "done" && <Check size={13} />}
             </button>
-            <span>{s.title}</span>
+            <span className={`sub-kind ${s.kind === "delegation" ? "delegation" : s.kind === "execution" ? "execution" : "manual"}`} title={s.actor ? `実行主体: ${s.actor}` : undefined}>
+              {s.kind === "delegation" ? <Users size={12} /> : s.kind === "execution" ? <Terminal size={12} /> : <GitBranch size={12} />}
+            </span>
+            <span className="sub-content" title={[s.command, s.output].filter(Boolean).join("\n") || s.title}>
+              <strong>{s.title}</strong>
+              {s.actor && <small>主体: {s.actor === "claude" ? "Claude Code" : s.actor === "codex" ? "Codex CLI" : s.actor}</small>}
+              {s.command && <code>{s.command}</code>}
+              {s.output && <small>↳ {s.output}</small>}
+              {s.kind === "delegation" && s.delegatedTo && <small className="sub-delegated">↳ 委任先: {s.delegatedTo}</small>}
+            </span>
             <button
               className="icon"
               onClick={() => {
@@ -817,7 +830,7 @@ export default function App() {
   const selectedWorkId = task?.id ?? null;
   const total = state.projects.reduce(
     (n, p) =>
-      n + p.tasks.length + p.tasks.reduce((m, t) => m + t.subtasks.length, 0),
+      n + p.tasks.length + p.tasks.reduce((m, t) => m + t.subtasks.filter((subtask) => !subtask.kind).length, 0),
     0,
   );
   const done = state.projects.reduce(
@@ -825,7 +838,7 @@ export default function App() {
       n +
       p.tasks.filter((t) => t.status === "done").length +
       p.tasks.reduce(
-        (m, t) => m + t.subtasks.filter((s) => s.status === "done").length,
+        (m, t) => m + t.subtasks.filter((s) => !s.kind && s.status === "done").length,
         0,
       ),
     0,
@@ -938,6 +951,14 @@ export default function App() {
             <span>
               <i className="legend-dot done" />
               Done
+            </span>
+            <span>
+              <i className="legend-marker execution" />
+              CLI実行
+            </span>
+            <span>
+              <i className="legend-marker delegation" />
+              委任
             </span>
             <em>right-click → 絞り込み · ← → navigate · Esc back</em>
           </div>

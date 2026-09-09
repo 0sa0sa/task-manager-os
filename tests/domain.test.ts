@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apply, interpretVoice, seed } from '../src/domain';
+import { apply, interpretVoice, progress, seed } from '../src/domain';
 
 describe('task domain', () => {
   it('creates a task, preserves one-level subtasks, and undoes the mutation', () => {
@@ -23,5 +23,10 @@ describe('task domain', () => {
     const result = interpretVoice('Task Manager OSにタスク リリースを追加', state, null, null);
     expect(result.kind).toBe('ready');
     if (result.kind === 'ready') expect(result.command.type).toBe('task.create');
+  });
+  it('does not count Herdr execution evidence as project completion', () => {
+    const state = seed();
+    state.projects[0].tasks[0].subtasks = [{ id: 'activity-1', title: 'CLI実行: bun test', status: 'done', kind: 'execution', source: 'herdr' }];
+    expect(progress(state.projects[0])).toBe(0);
   });
 });
