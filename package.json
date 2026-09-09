@@ -1,0 +1,40 @@
+{
+  "name": "task-manager-os",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n api,web -c yellow,cyan \"bun run dev:server\" \"bun run dev:web\"",
+    "dev:server": "bun --watch server/index.ts",
+    "dev:web": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "bunx oxlint src server tests",
+    "test": "bunx vitest run",
+    "typecheck": "tsc -b --pretty false",
+    "preview": "vite preview",
+    "start": "bun server/index.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.5",
+    "lucide-react": "^1.34.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "concurrently": "^10.0.5",
+    "jsdom": "^30.0.1",
+    "oxlint": "^1.79.0",
+    "tsx": "^4.23.12",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}

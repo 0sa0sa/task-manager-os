@@ -1,0 +1,12 @@
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { createApp } from './app.js';
+import { Store } from './store.js';
+const port = Number(process.env.PORT ?? 8798);
+const path = process.env.TASK_MANAGER_OS_DATA_PATH ?? join(homedir(), '.task-manager-os', 'state.json');
+const app = createApp(new Store(path));
+app.use('/*', serveStatic({ root: './dist' }));
+app.get('/*', serveStatic({ path: './dist/index.html' }));
+serve({ fetch: app.fetch, port }, info => console.log(`Task Manager OS: http://localhost:${info.port}`));
