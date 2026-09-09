@@ -131,21 +131,23 @@ export function FounderGraph({
     () =>
       state.projects.map((project, index) => {
         const angle = -90 + (index * 360) / Math.max(1, state.projects.length);
-        const projectPosition = polar(RP, angle);
+        const centered = project.id === filterProjectId;
+        const projectPosition = centered ? { x: CX, y: CY } : polar(RP, angle);
         const focused = project.id === projectId;
         const tucked = !!projectId && !focused;
-        const taskRadius = focused ? RT + 34 : tucked ? RT - 46 : RT;
-        const taskSpread = focused ? 104 : tucked ? 18 : 46;
+        const taskRadius = centered ? RT + 16 : focused ? RT + 34 : tucked ? RT - 46 : RT;
+        const taskSpread = centered ? 360 : focused ? 104 : tucked ? 18 : 46;
         const tasks = project.tasks.map((task, taskIndex) => {
           const taskAngle =
-            angle +
+            (centered ? -90 : angle) +
             (project.tasks.length === 1
               ? 0
-              : -taskSpread / 2 +
-                (taskIndex * taskSpread) / (project.tasks.length - 1));
+              : centered
+                ? (taskIndex * taskSpread) / project.tasks.length
+                : -taskSpread / 2 + (taskIndex * taskSpread) / (project.tasks.length - 1));
           const taskPosition = polar(taskRadius, taskAngle);
-          const subRadius = focused ? RS + 22 : tucked ? RS - 68 : RS;
-          const subSpread = focused ? 58 : tucked ? 12 : 26;
+          const subRadius = centered ? RS - 18 : focused ? RS + 22 : tucked ? RS - 68 : RS;
+          const subSpread = centered ? 72 : focused ? 58 : tucked ? 12 : 26;
           const subtasks = task.subtasks.map((subtask, subIndex) => ({
             subtask,
             pos: polar(
@@ -161,17 +163,23 @@ export function FounderGraph({
         });
         return { project, angle, pos: projectPosition, tasks };
       }),
-    [state.projects, projectId],
+    [state.projects, projectId, filterProjectId],
   );
   const visiblePlaced = useMemo(
     () => filterProjectId ? placed.filter((item) => item.project.id === filterProjectId) : placed,
     [filterProjectId, placed],
   );
 
-  const position = (id: string, base: Pos): Pos =>
-    offsets[id]
+  const position = (id: string, base: Pos): Pos => {
+    // A project filter is an intentional presentation mode: keep the selected
+    // project and its work items on the deterministic orbit, even when the
+    // overview has saved manual offsets. Clearing the filter restores those
+    // offsets without mutating the user's layout.
+    if (filterProjectId) return base;
+    return offsets[id]
       ? { x: base.x + offsets[id].x, y: base.y + offsets[id].y }
       : base;
+  };
   const activeProject = placed.find((item) => item.project.id === projectId);
   const activeTask = activeProject?.tasks.find(
     (item) => item.task.id === taskId,
@@ -182,10 +190,11 @@ export function FounderGraph({
   const activeProjectPos = useMemo(
     () => {
       if (!activeProject) return undefined;
+      if (filterProjectId === activeProject.project.id) return activeProject.pos;
       const delta = offsets[activeProject.project.id];
       return delta ? { x: activeProject.pos.x + delta.x, y: activeProject.pos.y + delta.y } : activeProject.pos;
     },
-    [activeProject, offsets],
+    [activeProject, offsets, filterProjectId],
   );
   const activeWorkPos = useMemo(
     () => {
@@ -195,10 +204,11 @@ export function FounderGraph({
           ? { id: activeSubtask.subtask.id, pos: activeSubtask.pos }
           : undefined;
       if (!item) return undefined;
+      if (filterProjectId) return item.pos;
       const delta = offsets[item.id];
       return delta ? { x: item.pos.x + delta.x, y: item.pos.y + delta.y } : item.pos;
     },
-    [activeTask, activeSubtask, offsets],
+    [activeTask, activeSubtask, offsets, filterProjectId],
   );
   const hoverChain = useMemo(() => {
     if (!hoverId) return null;
@@ -239,7 +249,13 @@ export function FounderGraph({
   const showLabel = (id: string) =>
     // Showing every focused task makes a busy workspace unreadable. Keep the
     // full title in the SVG <title> and reveal one label on hover/selection.
-    Boolean(id === taskId || hoverId === id);
+    // The project-only view is deliberately the exception: its task labels
+    // should be readable without requiring a second interaction.
+    Boolean(
+      id === taskId ||
+        hoverId === id ||
+        (filterProjectId && visiblePlaced.some((item) => item.tasks.some((task) => task.task.id === id))),
+    );
   const activateKeyboard = (event: ReactKeyboardEvent<SVGGElement>, activate: () => void) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
@@ -261,7 +277,7 @@ export function FounderGraph({
     const nextTarget = !target
       ? home
       : (() => {
-          const width = taskId ? W * 0.46 : W * 0.88;
+          const width = taskId ? W * 0.46 : filterProjectId ? W * 1.08 : W * 0.88;
           // In focus mode the selected project is the map's visual center.
           // The viewbox interpolation below provides the animated transition.
           const center = target;
@@ -294,7 +310,7 @@ export function FounderGraph({
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [projectId, taskId, activeProjectPos, activeWorkPos]);
+  }, [projectId, taskId, filterProjectId, activeProjectPos, activeWorkPos]);
 
   const svgPoint = (clientX: number, clientY: number): Pos | null => {
     const element = svgRef.current;
@@ -398,12 +414,12 @@ export function FounderGraph({
   const moveProject = (direction: number) => {
     if (!state.projects.length) return;
     const current = state.projects.findIndex((p) => p.id === projectId);
-    onProject(
-      state.projects[
-        (Math.max(0, current) + direction + state.projects.length) %
-          state.projects.length
-      ].id,
-    );
+    const next = state.projects[
+      (Math.max(0, current) + direction + state.projects.length) %
+        state.projects.length
+    ].id;
+    if (filterProjectId) onFilterProject(null);
+    onProject(next);
   };
 
   const contextTargetIds = (kind: "project" | "task" | "subtask", id: string) => {
@@ -468,7 +484,7 @@ export function FounderGraph({
         )?.task.id ?? null);
   return (
     <div
-      className={`founder-graph${fullscreen ? " is-fullscreen" : ""}${projectId ? " is-focus-mode" : ""}`}
+      className={`founder-graph${fullscreen ? " is-fullscreen" : ""}${filterProjectId ? " is-focus-mode" : ""}`}
       tabIndex={0}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -489,7 +505,9 @@ export function FounderGraph({
       <div className="graph-head">
         <span>
           {activeProject
-            ? `FOCUS · ${activeProject.project.name} · PROJECT CENTER`
+            ? filterProjectId === activeProject.project.id
+              ? `FOCUS · ${activeProject.project.name} · PROJECT CENTER`
+              : activeProject.project.name
             : "Herdr recorded snapshot · local state overlay"}
         </span>
         <button onClick={() => setFullscreen((value) => !value)}>
@@ -603,6 +621,7 @@ export function FounderGraph({
         })}
         <g
           className="founder-node founder-node--hub"
+          data-node-id="hub"
           onMouseEnter={() => setHoverId("hub")}
           onMouseLeave={() => setHoverId((current) => (current === "hub" ? null : current))}
           onClick={() => onProject(null)}
@@ -841,7 +860,7 @@ export function FounderGraph({
             <>
               {contextMenu.kind === "project" && (
                 <button onClick={filterTarget} disabled={filterProjectId === contextMenu.id}>
-                  {filterProjectId === contextMenu.id ? "このプロジェクトで絞り込み中" : "このプロジェクトに絞る"}
+                  {filterProjectId === contextMenu.id ? "このプロジェクトだけに絞り込み中" : "このプロジェクトだけに絞る"}
                 </button>
               )}
               <button onClick={toggleHidden}>{hiddenSet.has(contextMenu.id || "") ? "表示する" : "非表示にする"}</button>

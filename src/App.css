@@ -62,3 +62,6 @@
 .sub-row.selected { border-color: #42b7a6; background: #172a26; box-shadow: inset 2px 0 #42b7a6; }
 .subtask-hit-area { fill: #101918; stroke: none; opacity: 0; pointer-events: all; }
 .founder-graph.is-focus-mode .graph-head > span { color: #e35c35; }
+.founder-node--hub { transition: opacity .6s ease; }
+.founder-graph.is-focus-mode .founder-node--hub { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .founder-node--hub { transition: none; } }
