@@ -88,8 +88,9 @@ function VoiceBar({
   const cleanupAudio = () => {
     processorRef.current?.disconnect();
     processorRef.current = null;
-    void contextRef.current?.close();
+    const context = contextRef.current;
     contextRef.current = null;
+    void context?.close().catch(() => undefined);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   };
@@ -144,9 +145,9 @@ function VoiceBar({
       const socket = new WebSocket(`${protocol}//${window.location.host}/api/soniox`);
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
+      setListening(true);
       socket.onopen = () => {
         socket.send(JSON.stringify({ type: "start" }));
-        setListening(true);
         startingRef.current = false;
         setVoiceStatus("Sonioxへ接続中…");
       };
