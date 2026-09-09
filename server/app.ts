@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { createHerdrWorkspace, readHerdrConversation, resumeHerdrConversation, startHerdrAgent } from './herdr.js';
+import { createHerdrWorkspace, readHerdrConversation, renameHerdrPane, resumeHerdrConversation, startHerdrAgent } from './herdr.js';
 import type { GraphLayout, GraphView, Task } from '../src/domain.js';
 import type { Store } from './store.js';
 export function createApp(store: Store) {
@@ -52,8 +52,31 @@ export function createApp(store: Store) {
     let body: unknown;
     try { body = await c.req.json(); } catch { return c.json({ ok: false, error: 'JSON形式が正しくありません' }, 400); }
     const message = body && typeof body === 'object' && typeof (body as any).message === 'string' ? (body as any).message : '';
-    try { resumeHerdrConversation(task, message); return c.json({ ok: true, conversation: readHerdrConversation(task) }); }
-    catch (error) { return c.json({ ok: false, error: error instanceof Error ? error.message : '会話を再開できませんでした' }, 502); }
+    try {
+      await resumeHerdrConversation(task, message);
+      // Give the agent terminal a moment to append the submitted prompt before
+      // returning the refreshed transcript to the UI.
+      await new Promise(resolve => setTimeout(resolve, 250));
+      return c.json({ ok: true, sent: true, conversation: readHerdrConversation(task) });
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '会話を再開できませんでした';
+      return c.json({ ok: false, error: message }, /メッセージは/u.test(message) ? 400 : 502);
+    }
+  });
+  app.patch('/api/herdr/panes/:taskId', async c => {
+    const task = await findTask(c.req.param('taskId'));
+    if (!task) return c.json({ ok: false, error: 'タスクが見つかりません' }, 404);
+    if (!task.paneId || (task.agent !== 'claude' && task.agent !== 'codex')) return c.json({ ok: false, error: 'このタスクにはClaude CodeまたはCodexのpaneがありません' }, 404);
+    let body: unknown;
+    try { body = await c.req.json(); } catch { return c.json({ ok: false, error: 'JSON形式が正しくありません' }, 400); }
+    const label = body && typeof body === 'object' && typeof (body as any).label === 'string' ? (body as any).label : '';
+    try { renameHerdrPane(task, label); return c.json({ ok: true, state: await store.syncHerdr() }); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Herdr pane名を更新できませんでした';
+      const status = /入力してください/u.test(message) ? 400 : 502;
+      return c.json({ ok: false, error: message }, status);
+    }
   });
   app.put('/api/layout', async c => {
     let body: unknown;

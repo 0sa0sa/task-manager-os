@@ -316,15 +316,20 @@ function Detail({
   const [conversation, setConversation] = useState<ConversationSnapshot | null>(null);
   const [conversationBusy, setConversationBusy] = useState(false);
   const [conversationError, setConversationError] = useState("");
+  const [conversationNotice, setConversationNotice] = useState("");
+  const [herdrLabel, setHerdrLabel] = useState("");
+  const [herdrRenameBusy, setHerdrRenameBusy] = useState(false);
   const [reply, setReply] = useState("");
   useEffect(() => {
     setName(task?.title ?? project?.name ?? "");
     setDescription(task?.description ?? "");
+    setHerdrLabel(task?.title?.replace(/^(?:Claude Code|Codex|Agent)\s*·\s*/u, "") ?? "");
   }, [task?.id, task?.title, task?.description, project?.id, project?.name]);
   useEffect(() => {
     let cancelled = false;
     setConversation(null);
     setConversationError("");
+    setConversationNotice("");
     setReply("");
     setConversationBusy(false);
     if (!task?.paneId || (task.agent !== "claude" && task.agent !== "codex")) return;
@@ -340,14 +345,30 @@ function Detail({
     if (!task?.paneId || !reply.trim() || conversationBusy) return;
     setConversationBusy(true);
     setConversationError("");
+    setConversationNotice("");
     try {
       const response = await fetch(`/api/conversations/${encodeURIComponent(task.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: reply }) });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error);
       setConversation(body.conversation as ConversationSnapshot);
+      setConversationNotice("local Herdr paneへ送信しました");
       setReply("");
     } catch (error) { setConversationError(error instanceof Error ? error.message : "会話を再開できませんでした"); }
     finally { setConversationBusy(false); }
+  };
+  const renamePane = async () => {
+    if (!task?.paneId || !herdrLabel.trim() || herdrRenameBusy) return;
+    setHerdrRenameBusy(true);
+    setConversationError("");
+    setConversationNotice("");
+    try {
+      const response = await fetch(`/api/herdr/panes/${encodeURIComponent(task.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: herdrLabel }) });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error);
+      onHerdrState(body.state as State);
+      setConversationNotice("Herdr pane名を更新しました");
+    } catch (error) { setConversationError(error instanceof Error ? error.message : "Herdr pane名を更新できませんでした"); }
+    finally { setHerdrRenameBusy(false); }
   };
   const refreshConversation = async () => {
     if (!task?.paneId || conversationBusy) return;
@@ -604,6 +625,15 @@ function Detail({
             </div>
           ) : conversation?.excerpt ? <pre className="conversation-excerpt">{conversation.excerpt}</pre> : null}
           {conversationError && <p className="conversation-error">{conversationError}</p>}
+          {conversationNotice && <p className="conversation-notice">{conversationNotice}</p>}
+          <div className="herdr-pane-name">
+            <label>
+              <span>HERDR PANE NAME</span>
+              <input value={herdrLabel} onChange={(event) => setHerdrLabel(event.target.value)} maxLength={120} placeholder="例: APIの冪等性を実装" disabled={herdrRenameBusy} />
+            </label>
+            <button type="button" onClick={() => void renamePane()} disabled={herdrRenameBusy || !herdrLabel.trim()}>{herdrRenameBusy ? "保存中…" : "Herdr名を保存"}</button>
+          </div>
+          <small className="conversation-route">送信先: local Herdr · {task.paneId}（入力後にEnterまで送信）</small>
           <div className="conversation-compose">
             <textarea value={reply} onChange={(e) => setReply(e.target.value)} placeholder="このpaneで会話を再開…" maxLength={4000} disabled={conversationBusy} />
             <button onClick={() => void resumeConversation()} disabled={conversationBusy || !reply.trim()}>{conversationBusy ? "送信中…" : "会話を再開"}</button>

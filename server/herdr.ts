@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
+import { basename } from 'node:path';
 import { COLORS, type Project, type State, type Status, type Task } from '../src/domain.js';
 
 interface Workspace { workspace_id: string; label: string; }
@@ -8,7 +9,61 @@ const unwrap = (value: any) => value?.result ?? value;
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 function cli(args: string[]): any | null { try { const raw = execFileSync('herdr', args, { encoding: 'utf8', timeout: 3000, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); return unwrap(JSON.parse(raw)); } catch { return null; } }
 function gitRoot(path?: string) { if (!path) return undefined; try { return execFileSync('git', ['-C', path, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 1200, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined; } catch { return undefined; } }
+function gitBranch(path?: string) { if (!path) return undefined; try { return execFileSync('git', ['-C', path, 'branch', '--show-current'], { encoding: 'utf8', timeout: 1200, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined; } catch { return undefined; } }
 function status(value?: string): Status { return value === 'working' || value === 'blocked' ? 'doing' : value === 'done' ? 'done' : 'todo'; }
+
+const agentLabel = (agent?: string) => agent === 'codex' ? 'Codex' : agent === 'claude' ? 'Claude Code' : 'Agent';
+const genericPaneLabel = (label: string | undefined, paneId: string) => {
+  const value = label?.trim() || '';
+  if (!value) return true;
+  if (value === paneId || value.includes(paneId)) return true;
+  return /^(?:claude(?:\s+code)?|codex|agent)(?:\s*[·:/-].*)?$/iu.test(value) || /(?:handoff|forked)/iu.test(value);
+};
+const paneHintCache = new Map<string, { at: number; value?: string }>();
+function paneTaskHint(paneId: string): string | undefined {
+  const cached = paneHintCache.get(paneId);
+  if (cached && Date.now() - cached.at < 30_000) return cached.value;
+  try {
+    const raw = execFileSync('herdr', ['pane', 'read', paneId, '--source', 'recent-unwrapped', '--lines', '24', '--format', 'text'], { encoding: 'utf8', timeout: 1500, maxBuffer: 128 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    const lines = raw.replace(ANSI_ESCAPE, '').replace(/\r/g, '').split('\n').map(line => line.trim()).filter(Boolean);
+    const recap = lines.find(line => /(?:※\s*)?recap\s*:/iu.test(line))?.replace(/^.*?(?:※\s*)?recap\s*:\s*/iu, '').trim();
+    if (recap && !/^ask\s+(?:codex|claude)\s+to\s+do\s+anything/iu.test(recap)) {
+      const value = recap.replace(/\s+/gu, ' ').slice(0, 96).trim();
+      paneHintCache.set(paneId, { at: Date.now(), value });
+      return value;
+    }
+    const prompts = lines.filter(line => /^(?:❯|›)\s*\S/u.test(line) && !/^›\s*Ask\s+(?:Codex|Claude)\s+to\s+do\s+anything/iu.test(line)).map(line => line.replace(/^(?:❯|›)\s*/u, '').trim());
+    const value = prompts.at(-1)?.replace(/\s+/gu, ' ').slice(0, 96).trim() || undefined;
+    paneHintCache.set(paneId, { at: Date.now(), value });
+    return value;
+  } catch {
+    paneHintCache.set(paneId, { at: Date.now() });
+    return undefined;
+  }
+}
+
+/**
+ * Herdr's automatic labels are useful for the terminal, but are not task names.
+ * Keep the source label intact and derive a stable, human-readable title for the
+ * graph from the pane label, worktree directory, and current branch.
+ */
+export function friendlyPaneTitle(pane: Pane): string {
+  const cwd = pane.foreground_cwd || pane.cwd;
+  const root = gitRoot(cwd) || cwd;
+  const folder = root ? basename(root) : '';
+  const branch = gitBranch(cwd);
+  const label = pane.label?.trim();
+  if (genericPaneLabel(label, pane.pane_id)) {
+    const hint = paneTaskHint(pane.pane_id);
+    if (hint) return `${agentLabel(pane.agent)} · ${hint}`;
+  }
+  const context = branch && branch !== 'main' && branch !== 'master'
+    ? `${folder || 'workspace'} / ${branch}`
+    : folder || branch || pane.pane_id;
+  return genericPaneLabel(label, pane.pane_id)
+    ? `${agentLabel(pane.agent)} · ${context}`
+    : `${label} · ${context}`;
+}
 
 export function buildHerdrProjects(workspaces: Workspace[], panes: Pane[]): Project[] {
   const byWorkspace = new Map<string, Pane[]>();
@@ -16,13 +71,20 @@ export function buildHerdrProjects(workspaces: Workspace[], panes: Pane[]): Proj
   return workspaces.filter(w => (byWorkspace.get(w.workspace_id)?.length ?? 0) > 0).map((workspace, index) => {
     const workspacePanes = byWorkspace.get(workspace.workspace_id) ?? [];
     const firstPath = workspacePanes.map(p => p.foreground_cwd || p.cwd).map(gitRoot).find(Boolean);
-    const tasks: Task[] = workspacePanes.slice(0, 12).map(pane => ({
-      id: `herdr-${workspace.workspace_id}-${pane.pane_id.replace(/[^a-zA-Z0-9-]/g, '-')}`,
-      title: pane.label || `${pane.agent === 'codex' ? 'Codex' : pane.agent === 'claude' ? 'Claude Code' : 'Agent'} · ${pane.pane_id}`,
-      description: `${pane.agent ?? 'agent'} pane ${pane.pane_id}${pane.foreground_cwd ? ` · ${pane.foreground_cwd}` : ''}`,
-      status: status(pane.agent_status), subtasks: [], source: 'herdr', paneId: pane.pane_id,
-      workspaceId: workspace.workspace_id, agent: pane.agent, agentStatus: pane.agent_status, agentSessionId: pane.agent_session?.value, repoPath: firstPath || pane.foreground_cwd || pane.cwd,
-    }));
+    const titleCounts = new Map<string, number>();
+    const tasks: Task[] = workspacePanes.slice(0, 12).map(pane => {
+      const branch = gitBranch(pane.foreground_cwd || pane.cwd);
+      const baseTitle = friendlyPaneTitle(pane);
+      const count = titleCounts.get(baseTitle) ?? 0;
+      titleCounts.set(baseTitle, count + 1);
+      return {
+        id: `herdr-${workspace.workspace_id}-${pane.pane_id.replace(/[^a-zA-Z0-9-]/g, '-')}`,
+        title: count ? `${baseTitle} · ${pane.pane_id}` : baseTitle,
+        description: `${agentLabel(pane.agent)} · Herdr pane ${pane.pane_id}${pane.foreground_cwd ? ` · ${pane.foreground_cwd}` : ''}${branch ? ` · branch ${branch}` : ''}`,
+        status: status(pane.agent_status), subtasks: [], source: 'herdr', paneId: pane.pane_id,
+        workspaceId: workspace.workspace_id, agent: pane.agent, agentStatus: pane.agent_status, agentSessionId: pane.agent_session?.value, repoPath: firstPath || pane.foreground_cwd || pane.cwd,
+      };
+    });
     return { id: `herdr-${workspace.workspace_id}`, name: workspace.label, color: COLORS[index % COLORS.length], tasks, source: 'herdr', workspaceId: workspace.workspace_id, repoPath: firstPath || workspacePanes[0]?.foreground_cwd || workspacePanes[0]?.cwd };
   });
 }
@@ -61,12 +123,27 @@ export function readHerdrConversation(task: Task) {
   return { taskId: task.id, paneId: task.paneId || '', agent: task.agent || 'agent', status: task.agentStatus || 'unknown', ...parsed, updatedAt: new Date().toISOString() };
 }
 
-export function resumeHerdrConversation(task: Task, message: string): void {
+export async function resumeHerdrConversation(task: Task, message: string): Promise<void> {
   if (!task.paneId) throw new Error('このタスクには接続されたagent paneがありません');
   const trimmed = message.trim();
   if (!trimmed || trimmed.length > 4000) throw new Error('メッセージは1〜4000文字で入力してください');
-  try { execFileSync('herdr', ['pane', 'send-text', task.paneId, `${trimmed}\n`], { encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); }
-  catch { throw new Error('agent paneへメッセージを送信できませんでした'); }
+  try {
+    // send-text writes literal text. Enter is a separate key event in Herdr;
+    // sending both makes the action equivalent to typing a prompt and pressing
+    // Enter in the local agent pane.
+    execFileSync('herdr', ['pane', 'send-text', task.paneId, trimmed], { encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    execFileSync('herdr', ['pane', 'send-keys', task.paneId, 'enter'], { encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+  }
+  catch { throw new Error('local Herdr paneへメッセージを送信できませんでした'); }
+}
+
+export function renameHerdrPane(task: Task, label: string): unknown {
+  if (!task.paneId) throw new Error('このタスクには接続されたagent paneがありません');
+  const next = label.trim();
+  if (!next || next.length > 120) throw new Error('Herdr pane名は1〜120文字で入力してください');
+  try { return runHerdr(['pane', 'rename', task.paneId, next]); }
+  catch { throw new Error('Herdr pane名を更新できませんでした'); }
 }
 
 export function readHerdrProjects(): Project[] {

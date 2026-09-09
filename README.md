@@ -35,11 +35,15 @@ upstream connection is unavailable, the UI stops the capture and shows a local e
 leaking credentials.
 
 The `HERDR SYNC` button reads the local Herdr registry. Workspaces become projects and agent
-panes become tasks, including pane IDs, provider and live status. Manual tasks are preserved
-when the snapshot refreshes.
+panes become tasks, including pane IDs, provider and live status. Generic labels such as
+`claude-handoff` are replaced in the graph by a readable task hint from the latest Herdr recap
+or prompt, with the worktree and branch as a fallback. Manual tasks are preserved when the
+snapshot refreshes.
 
 Clicking a Claude Code or Codex task loads the pane's recent transcript and a compact recap;
-the composer sends a new prompt back into that Herdr pane so the session can continue. Graph
+the composer sends literal text and an `enter` key event to the local Herdr pane so the session
+can continue. The same panel lets you save a descriptive Herdr pane name (using `pane rename`),
+which then becomes the source label on the next sync. Graph
 drag positions and hidden nodes are saved in the same local state file. Right-click a project,
 task, or subtask to hide/show it or reset that branch's layout; right-click the canvas to restore
 all hidden nodes. The VIEW switcher stores multiple named visibility presets, so you can move

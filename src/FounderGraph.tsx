@@ -55,6 +55,10 @@ const curve = (a: Pos, b: Pos) => {
 };
 const short = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+const taskGraphLabel = (title: string) => {
+  const withoutAgent = title.replace(/^(?:Claude Code|Codex|Agent)\s*·\s*/u, "");
+  return short(withoutAgent, 32);
+};
 
 interface Props {
   state: State;
@@ -230,7 +234,9 @@ export function FounderGraph({
     return 1;
   };
   const showLabel = (id: string) =>
-    Boolean(focusChain?.has(id) || hoverChain?.has(id));
+    // Showing every focused task makes a busy workspace unreadable. Keep the
+    // full title in the SVG <title> and reveal one label on hover/selection.
+    Boolean(id === taskId || hoverId === id);
 
   const commitView = (next: View | ((current: View) => View)) => {
     setView((current) => {
@@ -499,6 +505,19 @@ export function FounderGraph({
           </button>
         </div>
       )}
+      {activeProject && activeProject.project.tasks.length > 0 && (
+        <div className="graph-task-index" aria-label={`${activeProject.project.name}のタスク一覧`}>
+          <div className="graph-task-index-heading"><span>TASK INDEX</span><b>{activeProject.project.tasks.length}</b></div>
+          <div className="graph-task-index-list">
+            {activeProject.project.tasks.filter(task => !hiddenSet.has(task.id)).map(task => (
+              <button key={task.id} className={task.id === taskId ? "active" : ""} onClick={() => onTask(task.id)}>
+                <i className={`status-dot ${task.status}`} />
+                <span>{task.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <svg
         ref={svgRef}
         viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
@@ -714,7 +733,7 @@ export function FounderGraph({
                     }
                     {showLabel(task.id) && (
                       <text y="19" className="task-label">
-                        {short(task.title, 27)}
+                        {taskGraphLabel(task.title)}
                       </text>
                     )}
                     {subtasks.filter(({ subtask }) => !hiddenSet.has(subtask.id)).map(({ subtask, pos: rawSubPos }) => {

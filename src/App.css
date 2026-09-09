@@ -24,5 +24,24 @@
 @keyframes founder-breathe { 0%, 100% { opacity: .15; } 50% { opacity: .7; } }
 .graph-context-menu { position: fixed; z-index: 50; min-width: 190px; border: 1px solid #4b5550; border-radius: 4px; background: rgba(13, 22, 21, .98); box-shadow: 0 12px 28px rgba(0,0,0,.45); padding: 7px; }.graph-context-menu strong { display: block; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e8e5da; padding: 5px 7px 8px; font: 10px 'DM Mono', monospace; }.graph-context-menu button { display: block; width: 100%; border: 0; border-top: 1px solid #293936; background: transparent; color: #aeb5ad; padding: 8px 7px; text-align: left; font: 10px 'DM Mono', monospace; }.graph-context-menu button:hover { color: #e35c35; background: #182522; }.graph-context-menu button:disabled { color: #53635d; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { .graph-grid, .founder-synapse, .breathe { animation: none; } }
-@media (max-width: 900px) { .founder-graph { height: 470px; min-height: 350px; } .graph-head > span { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+@media (max-width: 900px) { .founder-graph { height: 470px; min-height: 350px; } .graph-head > span { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .graph-task-index { width: min(245px, calc(100% - 24px)); top: 46px; right: 12px; } }
 .voice-status { position: absolute; right: 14px; top: 5px; color: #71807a; font: 8px 'DM Mono', monospace; letter-spacing: .06em; }
+.conversation-notice { margin: 8px 0 0; color: #42b7a6; font: 9px 'DM Mono', monospace; }
+.herdr-pane-name { display: flex; align-items: end; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #22312e; }
+.herdr-pane-name label { display: grid; gap: 5px; min-width: 0; flex: 1; }
+.herdr-pane-name label span { color: #71807a; font: 8px 'DM Mono', monospace; letter-spacing: .1em; }
+.herdr-pane-name input { min-width: 0; border: 1px solid #2b3a37; background: #0b1111; color: #dbe2da; padding: 7px 8px; font-size: 10px; }
+.herdr-pane-name input:focus { border-color: #42b7a6; outline: none; }
+.herdr-pane-name button { border: 1px solid #2b4a42; background: transparent; color: #9ab8ae; padding: 7px 8px; white-space: nowrap; font: 9px 'DM Mono', monospace; }
+.herdr-pane-name button:hover { border-color: #42b7a6; color: #b7e8de; }
+.herdr-pane-name button:disabled { opacity: .45; }
+.conversation-route { display: block; margin-top: 6px; color: #53635d; font: 8px 'DM Mono', monospace; line-height: 1.4; }
+.graph-task-index { position: absolute; z-index: 3; top: 47px; right: 12px; width: min(270px, 32%); border: 1px solid #394541; border-radius: 4px; background: rgba(13,22,21,.94); backdrop-filter: blur(5px); pointer-events: auto; }
+.graph-task-index-heading { display: flex; justify-content: space-between; padding: 8px 9px 7px; border-bottom: 1px solid #293936; color: #42b7a6; font: 9px 'DM Mono', monospace; letter-spacing: .1em; }
+.graph-task-index-heading b { color: #71807a; font-weight: 400; }
+.graph-task-index-list { display: grid; max-height: 245px; overflow: auto; padding: 3px; }
+.graph-task-index-list button { display: flex; align-items: flex-start; gap: 7px; width: 100%; border: 0; border-bottom: 1px solid rgba(41,57,54,.75); background: transparent; color: #aeb5ad; padding: 7px 5px; text-align: left; font-size: 10px; line-height: 1.35; }
+.graph-task-index-list button:last-child { border-bottom: 0; }
+.graph-task-index-list button:hover, .graph-task-index-list button.active { background: #182a26; color: #e8e5da; }
+.graph-task-index-list button .status-dot { margin-top: 4px; }
+.graph-task-index-list button span { min-width: 0; overflow-wrap: anywhere; }

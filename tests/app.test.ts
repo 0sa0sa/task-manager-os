@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app';
 import { Store } from '../server/store';
+import { seed } from '../src/domain';
 
 describe('local API', () => {
   it('persists a command and returns JSON errors', async () => {
@@ -38,5 +39,15 @@ describe('local API', () => {
     const agents = await app.request('/api/herdr/agents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId: 'p-welcome', agent: 'shell' }) });
     expect(agents.status).toBe(400);
     expect((await agents.json() as any).error).toContain('agent');
+  });
+  it('validates Herdr pane names before invoking the CLI', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'task-manager-os-pane-'));
+    const path = join(dir, 'state.json');
+    const initial = seed();
+    initial.projects[0].tasks[0] = { ...initial.projects[0].tasks[0], paneId: 'w-test:p1', workspaceId: 'w-test', agent: 'codex', source: 'herdr' };
+    await writeFile(path, JSON.stringify(initial), 'utf8');
+    const response = await createApp(new Store(path)).request('/api/herdr/panes/t-welcome', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: '   ' }) });
+    expect(response.status).toBe(400);
+    expect((await response.json() as any).error).toContain('Herdr pane名');
   });
 });
