@@ -1,8 +1,8 @@
 # Task Manager OS
 
 Voice-first local project and task operations. The orbital map borrows the Project -> Task ->
-Subtask visual grammar from FounderOS, while Japanese continuous speech input follows the
-focused Web Speech API path from claude-voice.
+Subtask visual grammar from FounderOS. Continuous Japanese/English speech input is streamed to
+Soniox from the local server, so the API key never reaches the browser.
 
 ## Run with Bun
 
@@ -19,11 +19,20 @@ bun start
 ```
 
 State defaults to `~/.task-manager-os/state.json`. Set `TASK_MANAGER_OS_DATA_PATH` to use another
-local path. No cloud account is required.
+local path. Copy the local API settings from `mtg-notes/apps/api/.env` into this project's `.env`
+when needed; `.env` is ignored and must never be committed. Set `PORT=8798` for the Task Manager
+OS server and provide `SONIOX_API_KEY` to enable live recognition. A safe template is available at
+`.env.example`.
 
 Voice examples include `Task Manager OSにタスク テストを追加`, `このタスクを完了`,
 `このタスクにサブタスク テストを書くを追加`, and `元に戻す`. Commands are previewed before
 execution, ambiguous names are rejected, and destructive actions require confirmation.
+
+Press the SONIOX microphone button to grant microphone access and start a live PCM stream. Interim
+and finalized Soniox segments are shown in the command bar; finalized speech is appended to the
+draft and can be reviewed before execution. If microphone permission, the API key, or the
+upstream connection is unavailable, the UI stops the capture and shows a local error without
+leaking credentials.
 
 The `HERDR SYNC` button reads the local Herdr registry. Workspaces become projects and agent
 panes become tasks, including pane IDs, provider and live status. Manual tasks are preserved

@@ -29,6 +29,28 @@ import {
 import { FounderGraph } from "./FounderGraph";
 import "./App.css";
 
+type SonioxTranscriptUpdate = {
+  text: string;
+  textFinal: boolean;
+  segmentId: string;
+  speakerId: string | null;
+};
+
+function pcm16k(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  if (!samples.length || !Number.isFinite(sampleRate) || sampleRate <= 0) return new ArrayBuffer(0);
+  const ratio = sampleRate / 16000;
+  const output = new Int16Array(Math.max(1, Math.round(samples.length / ratio)));
+  for (let index = 0; index < output.length; index += 1) {
+    const source = index * ratio;
+    const lower = Math.floor(source);
+    const upper = Math.min(samples.length - 1, lower + 1);
+    const amount = source - lower;
+    const value = samples[lower] * (1 - amount) + samples[upper] * amount;
+    output[index] = Math.max(-1, Math.min(1, value)) * 0x7fff;
+  }
+  return output.buffer;
+}
+
 function VoiceBar({
   state,
   projectId,
@@ -45,62 +67,141 @@ function VoiceBar({
   const [draft, setDraft] = useState("");
   const [interim, setInterim] = useState("");
   const [listening, setListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("Soniox待機中");
   const [voiceError, setVoiceError] = useState("");
-  const recognitionRef = useRef<any>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const startingRef = useRef(false);
+  const finalizedSegmentsRef = useRef(new Set<string>());
+  const streamRef = useRef<MediaStream | null>(null);
+  const contextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interpretation = useMemo(
     () => interpretVoice(draft, state, projectId, taskId),
     [draft, state, projectId, taskId],
   );
   const supported =
     typeof window !== "undefined" &&
-    !!(
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition
-    );
-  const toggle = () => {
-    const Ctor =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-    if (!Ctor) return;
-    if (listening) {
-      recognitionRef.current?.stop();
-      recognitionRef.current = null;
-      setListening(false);
-      setInterim("");
+    !!window.WebSocket &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    !!(window.AudioContext || (window as any).webkitAudioContext);
+  const cleanupAudio = () => {
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+    void contextRef.current?.close();
+    contextRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  };
+  const stopCapture = () => {
+    const socket = socketRef.current;
+    setListening(false);
+    setInterim("");
+    cleanupAudio();
+    if (!socket) {
+      setVoiceStatus("Soniox待機中");
       return;
     }
-    const rec = new Ctor();
-    recognitionRef.current = rec;
-    rec.lang = "ja-JP";
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (e: any) => {
-      let i = "";
-      let f = "";
-      for (let n = e.resultIndex; n < e.results.length; n += 1) {
-        if (e.results[n].isFinal) f += e.results[n][0].transcript;
-        else i += e.results[n][0].transcript;
-      }
-      setInterim(i);
-      if (f.trim()) setDraft((x) => (x ? `${x} ${f.trim()}` : f.trim()));
-    };
-    rec.onerror = () => {
-      setVoiceError("マイクの利用を許可してください");
-      setListening(false);
-      recognitionRef.current = null;
-    };
-    rec.onend = () => {
-      setListening(false);
-      recognitionRef.current = null;
-    };
-    try {
-      rec.start();
-      setListening(true);
-    } catch {
-      setVoiceError("音声認識を開始できませんでした");
-      recognitionRef.current = null;
+    if (socket.readyState === WebSocket.OPEN) {
+      try { socket.send(JSON.stringify({ type: "stop" })); } catch { /* close below */ }
+      setVoiceStatus("停止処理中…");
+      if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = setTimeout(() => socket.close(), 2500);
+    } else {
+      socket.close();
     }
   };
+  const startCapture = async () => {
+    if (!supported || listening || startingRef.current) return;
+    startingRef.current = true;
+    setVoiceError("");
+    finalizedSegmentsRef.current.clear();
+    setVoiceStatus("マイクを準備しています…");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      streamRef.current = stream;
+      const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error("AudioContext unavailable");
+      const context = new AudioContextCtor() as AudioContext;
+      contextRef.current = context;
+      await context.resume();
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const silence = context.createGain();
+      silence.gain.value = 0;
+      processor.onaudioprocess = (event) => {
+        const socket = socketRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const bytes = pcm16k(event.inputBuffer.getChannelData(0), context.sampleRate);
+        if (bytes.byteLength > 64 * 1024) return;
+        socket.send(bytes);
+      };
+      source.connect(processor);
+      processor.connect(silence);
+      silence.connect(context.destination);
+      processorRef.current = processor;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(`${protocol}//${window.location.host}/api/soniox`);
+      socket.binaryType = "arraybuffer";
+      socketRef.current = socket;
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: "start" }));
+        setListening(true);
+        startingRef.current = false;
+        setVoiceStatus("Sonioxへ接続中…");
+      };
+      socket.onmessage = (event) => {
+        let message: { type?: string; message?: string; update?: SonioxTranscriptUpdate };
+        try { message = JSON.parse(String(event.data)) as typeof message; } catch { setVoiceError("音声認識サーバーの応答を解釈できませんでした"); return; }
+        if (message.type === "status") setVoiceStatus(message.message || "Soniox接続中…");
+        if (message.type === "error") {
+          setVoiceError(message.message || "Sonioxで音声認識できませんでした");
+          setListening(false);
+          startingRef.current = false;
+          cleanupAudio();
+          socket.close();
+        }
+        const update = message.update;
+        if (message.type === "transcript" && update?.text) {
+          if (update.textFinal) {
+            if (!finalizedSegmentsRef.current.has(update.segmentId)) {
+              finalizedSegmentsRef.current.add(update.segmentId);
+              setDraft((current) => current ? `${current} ${update.text}` : update.text);
+            }
+            setInterim("");
+          } else setInterim(update.text);
+        }
+      };
+      socket.onerror = () => {
+        setVoiceError("Sonioxへ接続できません。APIキー・契約・ネットワークを確認してください");
+        setListening(false);
+        startingRef.current = false;
+        cleanupAudio();
+        socket.close();
+      };
+      socket.onclose = () => {
+        if (socketRef.current === socket) socketRef.current = null;
+        startingRef.current = false;
+        if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+        stopTimerRef.current = null;
+        cleanupAudio();
+        setListening(false);
+        setVoiceStatus("Soniox待機中");
+      };
+    } catch {
+      cleanupAudio();
+      setListening(false);
+      startingRef.current = false;
+      setVoiceStatus("Soniox待機中");
+      setVoiceError("マイクを利用できません。ブラウザーの権限とHTTPS接続を確認してください");
+    }
+  };
+  useEffect(() => () => {
+    if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+    cleanupAudio();
+    socketRef.current?.close();
+  }, []);
+  const toggle = () => { if (listening) stopCapture(); else void startCapture(); };
   const run = async () => {
     if (interpretation.kind !== "ready") return;
     if (
@@ -122,7 +223,7 @@ function VoiceBar({
         aria-label={listening ? "音声入力を停止" : "音声入力を開始"}
       >
         {listening ? <MicOff size={19} /> : <Mic size={19} />}
-        <span>{listening ? "LISTENING" : "VOICE"}</span>
+        <span>{listening ? "LISTENING" : "SONIOX"}</span>
       </button>
       <div className="voice-input">
         <span>›</span>
@@ -140,6 +241,7 @@ function VoiceBar({
           aria-label="コマンド入力"
         />
         {interim && <em>{interim}</em>}
+        <small className="voice-status">{voiceStatus}</small>
         <small className={`interpretation ${interpretation.kind}`}>
           {draft
             ? interpretation.kind === "ready"
